@@ -1,0 +1,7 @@
+interface:
+  display_name: "Codex Peer"
+  short_description: "Get an independent review from Codex"
+  default_prompt: "Use $codex-peer to ask Codex for an independent critique of this plan."
+
+policy:
+  allow_implicit_invocation: false
