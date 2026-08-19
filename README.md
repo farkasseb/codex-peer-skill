@@ -19,7 +19,7 @@ The guidance here was distilled from about 200 real `codex exec` runs over four 
 | Sandbox | Ambient `workspace-write`, Codex edits mid-review | `--sandbox read-only`; writes are a separate authorized step |
 | Stdin | Prompt as argument, stdin left open, process hangs | `</dev/null` whenever the prompt is an argument |
 | Large input | Interpolate file contents into the shell argument | Pipe through stdin |
-| Resume | `--sandbox` after `resume` (exit 2), or ambiguous `resume --last` | Exec-level flags before `resume`, session ID from the run banner |
+| Resume | `--sandbox` after `resume` (exit 2), or ambiguous `resume --last` | Exec-level flags before `resume`; session ID from the run banner or the `--json` `thread.started` event |
 | Effort | Trust config defaults that pin low effort | Explicit model and reasoning effort per review |
 | Flag errors | Accept the CLI tip suggesting `full-auto` | Never; it silently widens the sandbox |
 | Failures | Present progress events as the review | Report the failed run separately from own analysis |
