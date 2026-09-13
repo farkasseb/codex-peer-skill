@@ -169,7 +169,11 @@ for required_text in \
   "JSONL event stream" \
   "~/.codex/config.toml" \
   "sandbox_mode" \
-  "full-auto"
+  "full-auto" \
+  "gpt-6-astra" \
+  "service_tier" \
+  "<stdin>" \
+  "turn.failed"
 do
   if has_text "$required_text" "$SKILL"; then
     pass "required guidance: $required_text"
@@ -197,6 +201,8 @@ reject_pattern 'model_reasoning_effort="u[l]tra"' "u[l]tra effort is not hard-co
 reject_pattern '\$\([[:space:]]*c[a]t[[:space:]]' "file contents are not interpolated with command substitution"
 reject_pattern 'Fallback skill|official codex plugin|/codex:' "stale fallback/plugin framing is absent"
 reject_pattern '^codex --ask-for-approval' "ignored root approval flag is not used before exec"
+reject_pattern '-{2}approve-for-me' "automatic approval reviewer flag is absent"
+reject_pattern 'approval_policy="untrusted"' "unsupported approval policy value is absent"
 
 if python3 -c '
 import re, sys
@@ -308,7 +314,10 @@ if command -v codex >/dev/null 2>&1; then
   while IFS= read -r flag; do
     [ -z "$flag" ] && continue
     case "$flag" in
-      --last)
+      --live)
+        continue
+        ;;
+      --last|--all)
         HELP_TEXT="$RESUME_HELP"
         SURFACE="codex exec resume --help"
         ;;
@@ -400,6 +409,7 @@ run_live_tests() {
   local jsonl
   local final_message
   local resume_message
+  local stdin_resume_message
   local schema
   local proposal
   local structured
@@ -498,15 +508,25 @@ run_live_tests() {
   # Positive control: proves the probe can observe a policy that does reach the
   # run. Without it, the negative control below could pass for any reason.
   probe_approval "positive control: -c approval_policy reaches the run" \
-    untrusted yes \
-    codex exec "${probe_base[@]}" -c 'approval_policy="untrusted"' \
+    on-request yes \
+    codex exec "${probe_base[@]}" -c 'approval_policy="on-request"' \
     "Reply with exactly: OK"
 
-  # Negative control: the documented bug. Same probe, same value, root position.
-  probe_approval "root --ask-for-approval is discarded before exec (bug still real)" \
-    untrusted no \
-    codex --ask-for-approval untrusted exec "${probe_base[@]}" \
-    "Reply with exactly: OK"
+  # Root-position observation. Older builds discarded a root --ask-for-approval
+  # before exec; newer ones forward it. The skill's rule (pin -c approval_policy
+  # on every run) holds either way, so this only reports which build you have.
+  if codex --ask-for-approval on-request exec "${probe_base[@]}" \
+    "Reply with exactly: OK" </dev/null >/dev/null 2>"$probe_stderr"
+  then
+    if grep -qE '^approval: *on-request' "$probe_stderr"; then
+      pass "root --ask-for-approval reaches the run on this build (pin -c anyway)"
+    else
+      pass "root --ask-for-approval is discarded before exec on this build (pin -c)"
+    fi
+  else
+    fail "root --ask-for-approval probe run itself failed"
+    sed -n '1,10p' "$probe_stderr" | sed 's/^/       /'
+  fi
 
   # The invariant the skill promises callers.
   probe_approval "-c approval_policy=never yields a non-escalating run" \
@@ -568,6 +588,33 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     fi
   else
     fail "session-ID resume failed"
+    sed -n '1,20p' "$stderr_file" | sed 's/^/       /'
+  fi
+
+  # Stdin sentinel on resume: the follow-up arrives through the pipe, so no
+  # </dev/null here, and the expected token is never part of the prompt.
+  stdin_resume_message="$live_root/resume-stdin.txt"
+  if [ -n "$thread_id" ] && printf '%s\n' \
+    "Repeat the exact token from your first reply in this session. Reply with only that token." \
+    | codex exec \
+      -C "$live_repo" \
+      --sandbox read-only \
+      -c 'approval_policy="never"' \
+      resume \
+      --ignore-user-config \
+      -m "$live_model" \
+      -c 'model_reasoning_effort="low"' \
+      --output-last-message "$stdin_resume_message" \
+      "$thread_id" - \
+      >/dev/null 2>"$stderr_file"
+  then
+    if has_text "CODEX_PEER_LIVE_OK" "$stdin_resume_message"; then
+      pass "resume with the - stdin sentinel recalled the first-turn token"
+    else
+      fail "resume via stdin sentinel ran but did not recall the first-turn token"
+    fi
+  else
+    fail "resume via the - stdin sentinel failed"
     sed -n '1,20p' "$stderr_file" | sed 's/^/       /'
   fi
 
