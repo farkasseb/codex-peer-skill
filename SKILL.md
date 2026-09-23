@@ -1,15 +1,6 @@
 ---
 name: codex-peer
-description: |
-  Ask OpenAI Codex for an independent second opinion on a plan, architecture,
-  implementation proposal, design trade-off, or diff, then synthesize its critique.
-  Use only when the user explicitly invokes codex-peer, asks to consult or ask Codex,
-  or requests a Codex second opinion—especially when reviewing a plan authored by
-  Claude. Supports host-neutral codex exec use, a dedicated Claude Code background
-  workflow, safe read-only review, structured output, and multi-turn follow-ups.
-  Do not invoke for ordinary reviews or generic second opinions that do not name
-  Codex. Inside Codex, do not recursively launch codex exec; use native delegation,
-  starting fresh initially and continuing the same delegate for re-reviews.
+description: "Independent OpenAI Codex review of plans, architecture, design trade-offs, or diffs. Use only for Codex review requests: \"ask codex\", \"consult Codex\", \"codex opinion\", or $codex-peer."
 ---
 
 # Codex Peer Review
