@@ -1,71 +1,40 @@
 # Codex Peer Skill
 
-AI skill for using OpenAI Codex as an independent peer reviewer: safe read-only `codex exec`, resume loops, synthesis.
+An agent skill for driving the OpenAI Codex CLI (`codex exec`) from Claude Code as a trusted peer. Codex handles second opinions, reviews, and delegated work such as investigating, fact-checking, implementing, and running tests.
 
-**This skill is deliberately conservative: read-only sandbox by default, `approval_policy="never"` pinned on every run, writes only as a separate explicitly authorized step, and the final recommendation always belongs to the calling agent, not to Codex.**
+The skill teaches the mechanics that agents keep getting wrong:
 
-## Why this exists
+- the flags that pin model, effort, approvals and permissions;
+- how to pass prompts and data;
+- how to wait for and monitor a background run;
+- how to resume a session;
+- the failure modes that have actually happened.
 
-Agents that shell out to the Codex CLI keep making the same mistakes. They leak their preferred conclusion into the prompt and get an echo instead of a review. They forget to close stdin on background runs and the process waits forever. They run with the ambient `workspace-write` sandbox and Codex edits files in the middle of a "review". They place flags after `resume` and get exit 2, accept the CLI's `full-auto` error tip and silently widen permissions, or present progress events from a failed run as Codex's conclusion.
+## What it encodes
 
-The guidance here was distilled from about 200 real `codex exec` runs over four months of daily use across several codebases. Every gotcha traces to a real incident, and the test suite checks the documented flag contract against the installed CLI so drift gets caught.
+- **Two modes, both with network and live web search.** Review mode is read-only. Work mode can write inside the working root. Both use Codex permission profiles (`default_permissions`), the only way found to combine read-only with network. Adding `--sandbox` overrides the profile and silently drops network.
+- **Core environment for commands.** By default Codex hands its commands every exported variable, API tokens included, and writes them in plain text to a shell snapshot under `~/.codex/shell_snapshots/`, which a killed run leaves behind. `shell_environment_policy.inherit="core"` trims the inherited set to `HOME`, `PATH`, locale and Codex's own variables, plus anything the user's `shell_environment_policy.set` adds. Launching Codex under `env -i` does not help: its snapshot shell runs the user's shell startup files, which can export secrets of their own.
+- **Reviews that can disagree.** A fresh session per review target, the user's settled decisions marked as not open, and no reasoning or expected answer in the prompt.
+- **Pin everything on every call.** Anything omitted falls back to `~/.codex/config.toml`, which may set `workspace-write` or low effort. `resume` keeps the conversation but not the settings.
+- **stdin.** Claude Code gives a command a never-closing stdin when its text contains any `<`, so an unredirected `codex exec` hangs forever. Every call gets `- < prompt.md`, a pipe, or `</dev/null`. `resume` drops piped data unless the prompt is `-`.
+- **Exit status.** Codex is the last command, unpiped. `| tee`, `| tail` or `; echo` hide failures.
+- **Waiting.** Run in the background from the main conversation, not a subagent. Raise the 30-minute background timeout for long runs. Wait for the notification, and stop runs with TaskStop.
 
-### What agents get wrong vs. what this skill enforces
+The failure table in `SKILL.md` comes from about 680 past `codex exec` runs and from experiments against codex-cli 0.160.0.
 
-| Topic | What agents do (wrong) | What the skill enforces |
-|-------|------------------------|-------------------------|
-| Independence | "Confirm that option B is better" | Neutral prompt with facts, constraints, and open questions |
-| Approval policy | Rely on ambient config | `-c 'approval_policy="never"'` on every run |
-| Sandbox | Ambient `workspace-write`, Codex edits mid-review | `--sandbox read-only`; writes are a separate authorized step |
-| Stdin | Prompt as argument, stdin left open, process hangs | `</dev/null` whenever the prompt is an argument |
-| Large input | Interpolate file contents into the shell argument | Pipe through stdin |
-| Resume | `--sandbox` after `resume` (exit 2), or ambiguous `resume --last` | Exec-level flags before `resume`; session ID from the run banner or the `--json` `thread.started` event |
-| Effort | Trust config defaults that pin low effort (sol's own default is low) | Explicit model and reasoning effort per review |
-| Flag errors | Accept the CLI tip suggesting `full-auto` | Never; it silently widens the sandbox |
-| Failures | Present progress events as the review | Report the failed run separately from own analysis |
-
-## Installation
-
-### Claude Code
+## Install
 
 ```bash
-mkdir -p ~/.claude/skills/codex-peer
-cp SKILL.md ~/.claude/skills/codex-peer/
+ln -s "$PWD" ~/.claude/skills/codex-peer
 ```
 
-The skill activates when you explicitly ask for a Codex second opinion ("ask codex", "/codex-peer", "get a Codex review of this plan"). It stays out of ordinary reviews that do not name Codex.
+`agents/openai.yaml` disables implicit invocation, so when this directory is shared with Codex, Codex runs the skill only on an explicit `$codex-peer`.
 
-### Codex CLI
+## Test
 
 ```bash
-mkdir -p ~/.codex/skills/codex-peer
-cp -r SKILL.md agents ~/.codex/skills/codex-peer/
+./test_skill.sh          # static: command rules, flags and models against the installed CLI
+./test_skill.sh --live   # also runs SKILL.md's own commands on a cheap model (uses Codex quota)
 ```
 
-Inside Codex the skill does not launch `codex exec` recursively; it routes the independent pass through native delegation.
-
-### Other AI tools
-
-`SKILL.md` is plain markdown and self-contained. Feed it as context to any shell-capable coding agent; the core workflow and CLI guidance are host-neutral, with Claude Code specifics isolated in one clearly marked section.
-
-## File structure
-
-```
-SKILL.md            # Host gate, core workflow, safe CLI invocation, failure handling
-agents/openai.yaml  # Codex-side skill metadata (explicit invocation only)
-evals/evals.json    # 22 behavioral eval cases
-test_skill.sh       # Deterministic drift tests; --live adds opt-in CLI smoke tests
-```
-
-## Testing
-
-```bash
-./test_skill.sh          # static checks, offline, free
-./test_skill.sh --live   # opt-in smoke tests against the real CLI (consumes Codex usage)
-```
-
-The static suite pins the safety-critical guidance (approval override in every example, resume flag ordering, no personal paths or emails) and verifies every documented flag against `codex exec --help` when the CLI is installed.
-
-## Contributing
-
-Found a CLI behavior change, a new failure mode, or a mistake agents make with Codex? PRs welcome. Please include how it reproduces (CLI version and command shape) for any additions.
+Run `--live` in the background. It takes a minute or two.

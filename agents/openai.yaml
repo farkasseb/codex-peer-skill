@@ -1,7 +1,9 @@
 interface:
   display_name: "Codex Peer"
-  short_description: "Get an independent review from Codex"
-  default_prompt: "Use $codex-peer to ask Codex for an independent critique of this plan."
+  short_description: "Run Codex CLI as a trusted peer"
+  default_prompt: "Use $codex-peer to have Codex review this or take on a task."
 
 policy:
+  # The skill drives codex exec from another host. Inside Codex, run it only
+  # on an explicit $codex-peer.
   allow_implicit_invocation: false
